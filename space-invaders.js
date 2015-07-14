@@ -12,6 +12,10 @@
 	this.bodies = [];
 	this.score = 0;
 	this.totalInvaders = 0;
+	this.invaderPatrolLimit = {
+		'min': 0,
+		'max': 30
+	};
 	this.player = null;
 
 	this.reset();
@@ -144,27 +148,67 @@ Game.prototype = {
 			}
 		}
 		if ( count < 1) {
-			// No invaders left, create a new wave
+			// No invaders left, so
+			// remove all the bullets (in reverse order)
+			for(var i = (this.bodies.length - 1); i >= 0; i-- ) {
+				if ( this.bodies[i].isBullet ) {
+					this.bodies[i].collision();
+				}
+			}
+			// and create a new wave
 			this.bodies = this.bodies.concat( createInvaders(this) );
+			this.resetInvaderLimits();
 		}
+	},
+	// loop over remaining invaders and recalculate limits
+	recalcLimits: function() {
+		var minX = 99;
+		var maxX = -1;
+		for(var i = 0, l = this.bodies.length; i < l; i++ ) {
+			if ( this.bodies[i].isInvader ) {
+				if ( this.bodies[i].gridLocation.x <= minX ) {
+					minX = this.bodies[i].gridLocation.x;
+				}
+				if ( this.bodies[i].gridLocation.x >= maxX ) {
+					maxX = this.bodies[i].gridLocation.x;
+				}
+			}
+		}
+		// little bit of math to calculate correct patrol limits
+		this.invaderPatrolLimit.min = minX * -30;
+		this.invaderPatrolLimit.max = ((maxX - 8) * -1) * 30;
+	},
+	// reset invaders to patrol using correct limits
+	resetInvaderLimits: function() {
+		this.invaderPatrolLimit.min = 0;
+		this.invaderPatrolLimit.max = 30;
 	}
   };
 
-  var Invader = function(game, center) {
+  var Invader = function(game, center, gridLocation) {
 	this.game = game;
 	this.center = center;
 	this.size = { x: 15, y: 15 };
 	this.patrolX = 0;
 	this.speedX = 0.3;
 	this.isInvader = true;
+	this.isBullet = false;
+	// use this to calculate where invader is in grid
+	this.gridLocation = gridLocation;
   };
 
   Invader.prototype = {
 	update: function() {
-		if (this.patrolX < 0 || this.patrolX > 30) {
+		if ( this.patrolX < this.game.invaderPatrolLimit.min || this.patrolX > this.game.invaderPatrolLimit.max ) {
 			this.speedX = -this.speedX;
 			// advance on the player
 			this.center.y += 10;
+			// speed up as invader goes down
+			if ( this.speedX < 0 ) {
+				this.speedX += -0.1;
+			} else {
+				this.speedX += 0.1;
+			}
 		}
 
 		// invaders get to shoot too
@@ -191,6 +235,8 @@ Game.prototype = {
 	collision: function() {
 		this.game.removeBody(this);
 
+		this.game.recalcLimits();
+
 		// it is possible for multiple bullets to hit an invader, so this can double count.
 		this.game.score++;
 
@@ -204,7 +250,7 @@ Game.prototype = {
 	for (var i = 0; i < 24; i++) {
 	  var x = 35 + (i % 8) * 30;
 	  var y = 0 + (i % 3) * 30;
-	  invaders.push(new Invader(game, { x: x, y: y}));
+	  invaders.push(new Invader(game, { 'x': x, 'y': y}, { 'x': (i % 8) }));
 	}
 
 	return invaders;
@@ -216,6 +262,10 @@ Game.prototype = {
 	this.center = { x: this.game.size.x / 2, y: this.game.size.y - 35 };
 	this.keyboarder = this.game.keyboarder;
 	this.isInvader = false;
+	this.isBullet = false;
+	this.timestamp = Date.now();
+	this.bulletcount = 0;
+	this.delay = 100;
   };
 
   Player.prototype = {
@@ -236,13 +286,28 @@ Game.prototype = {
 
 		// fire a bullet
 		if (this.keyboarder.isDown(this.keyboarder.KEYS.SPACE)) {
-			var bullet = new Bullet(this.game,
-									{ x: this.center.x, y: this.center.y - this.size.y - 10 },
-									{ x: 0, y: -7 });
-			this.game.addBody(bullet);
-			// we don't need to load the sound everytime we want to play it
-			// this.game.shootSound.load();
-			this.game.shootSound.play();
+
+			// rate limit the bullets
+			var now = Date.now();
+			if ( now >= this.timestamp + this.delay ) {
+				var bullet = new Bullet(this.game,
+										{ x: this.center.x, y: this.center.y - this.size.y - 10 },
+										{ x: 0, y: -7 });
+				this.game.addBody(bullet);
+				// we don't need to load the sound everytime we want to play it
+				// this.game.shootSound.load();
+				this.game.shootSound.play();
+				this.timestamp = Date.now();
+				this.bulletcount++;
+				if ( this.bulletcount > 10 ) {
+				  this.bulletcount = 0;
+				  this.delay = 500;
+				}
+				else
+				{
+					this.delay = 100;
+				}
+			}
 		}
 	},
 
@@ -262,6 +327,7 @@ Game.prototype = {
 	this.size = { x: 3, y: 3 };
 	this.velocity = velocity;
 	this.isInvader = false;
+	this.isBullet = true;
   };
 
   Bullet.prototype = {
